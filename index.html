@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>✨ 오늘의 숙제 모험</title>
-<!-- Supabase 라이브러리 추가 -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- 최적화된 Supabase 클라이언트 라이브러리 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; font-family: "Pretendard", "Apple SD Gothic Neo", Arial, sans-serif; background: linear-gradient(135deg, #fff5d9, #e8f7ff); color: #333; min-height: 100vh; transition: 0.3s; }
@@ -55,7 +55,7 @@ h1 { margin: 0; font-size: 28px; }
 .progress-info p { margin: 0; color: #777; font-size: 14px; }
 .dark .progress-info p { color: #bbb; }
 
-/* 관리자 전용 제어 UI */
+/* 관리자 모드 전용 UI */
 .add-box { display: none; gap: 10px; background: #f8f8ff; padding: 12px; border-radius: 18px; margin-bottom: 15px; }
 .admin-mode .add-box { display: flex; }
 .add-box input, .add-box select { border: 2px solid #eee; border-radius: 12px; padding: 12px; font-size: 14px; outline: none; background: white; }
@@ -182,14 +182,21 @@ h1 { margin: 0; font-size: 28px; }
 
 <script>
 /* ========================================================
-   1. Supabase 연동 설정 (경로 오타 수정 완료)
+   1. 기본 설정 및 클라이언트 생성
 ======================================================== */
 const SUPABASE_URL = "https://hkcbsmeiqwyjekakiusc.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhrY2JzbWVpcXd5amVrYWtpdXNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwNzk3MzgsImV4cCI6MjEwNTY1NTczOH0.lEF5p3BLkiW_ruDgfYIZ7vNex7GAvD2Ag4idJjJgY0w";
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let supabase = null;
+try {
+  if (window.supabase && typeof window.supabase.createClient === "function") {
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+} catch (err) {
+  console.error("Supabase 초기화 오류:", err);
+}
 
-const ADMIN_PIN = "1234"; 
+const ADMIN_PIN = "1234";
 let isAdmin = false;
 
 let data = {
@@ -200,7 +207,7 @@ let data = {
   darkMode: false
 };
 
-/* DOM 변수 */
+/* DOM 변수 선언 */
 const taskInput = document.getElementById("taskInput");
 const xpSelect = document.getElementById("xpSelect");
 const addBtn = document.getElementById("addBtn");
@@ -226,7 +233,7 @@ const levelUpText = document.getElementById("levelUpText");
 const closeLevelUp = document.getElementById("closeLevelUp");
 
 function escapeHTML(str) {
-  return str.replace(/[&<>'"]/g, tag => ({
+  return String(str).replace(/[&<>'"]/g, tag => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
   }[tag] || tag));
 }
@@ -256,26 +263,100 @@ function showToast(message) {
 }
 
 /* ========================================================
-   2. 클라우드(Supabase) 데이터 로드 및 실시간 동기화
+   2. 핵심 이벤트 리스너 선등록 (오류 발생 시에도 먹통 방지)
+======================================================== */
+adminBtn.addEventListener("click", () => {
+  if (isAdmin) {
+    isAdmin = false;
+    document.body.classList.remove("admin-mode");
+    adminBtn.textContent = "🔒";
+    showToast("사용자(자녀) 모드로 전환되었습니다.");
+  } else {
+    const enteredPin = prompt("관리자 PIN 번호를 입력하세요 (기본: 1234):");
+    if (enteredPin === ADMIN_PIN) {
+      isAdmin = true;
+      document.body.classList.add("admin-mode");
+      adminBtn.textContent = "🔓";
+      showToast("관리자 모드가 활성화되었습니다.");
+    } else if (enteredPin !== null) {
+      alert("PIN 번호가 올바르지 않습니다.");
+    }
+  }
+});
+
+themeBtn.addEventListener("click", () => {
+  data.darkMode = !data.darkMode;
+  renderTheme();
+  showToast(data.darkMode ? "🌙 다크모드로 변경했습니다." : "☀️ 밝은 모드로 변경했습니다.");
+});
+
+character.addEventListener("click", () => {
+  const messages = [
+    "🔥 할 수 있어요!", "💪 조금만 더 힘내요!", "⭐ 최고의 모험가!",
+    "🚀 숙제를 정복하러 가볼까요?", "🍀 오늘도 좋은 하루!", "⚔️ 퀘스트를 완료해봅시다!"
+  ];
+  showToast(messages[Math.floor(Math.random() * messages.length)]);
+  character.style.transform = "scale(1.25) rotate(8deg)";
+  setTimeout(() => { character.style.transform = ""; }, 250);
+});
+
+closeLevelUp.addEventListener("click", () => {
+  levelUp.classList.remove("show");
+});
+
+addBtn.addEventListener("click", addTask);
+taskInput.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") addTask();
+});
+
+/* ========================================================
+   3. 클라우드(Supabase) 데이터 통신 및 로컬 폴백
 ======================================================== */
 async function loadCloudData() {
-  const { data: tasks, error: taskErr } = await supabase.from('tasks').select('*').order('id', { ascending: true });
-  if (!taskErr && tasks) data.tasks = tasks;
-
-  const { data: profile, error: profErr } = await supabase.from('user_profile').select('*').eq('id', 1).single();
-  if (!profErr && profile) {
-    data.xp = profile.xp || 0;
-    data.totalCompleted = profile.total_completed || 0;
-    data.completedDates = profile.completed_dates || [];
+  if (!supabase) {
+    loadLocalFallback();
+    return;
   }
+  try {
+    const { data: tasks, error: taskErr } = await supabase.from('tasks').select('*').order('id', { ascending: true });
+    if (!taskErr && tasks) data.tasks = tasks;
 
+    const { data: profile, error: profErr } = await supabase.from('user_profile').select('*').eq('id', 1).maybeSingle();
+    if (!profErr && profile) {
+      data.xp = profile.xp || 0;
+      data.totalCompleted = profile.total_completed || 0;
+      data.completedDates = profile.completed_dates || [];
+    }
+  } catch (e) {
+    console.error("데이터 로딩 실패:", e);
+    loadLocalFallback();
+  }
   render();
 }
 
-supabase.channel('cloud-updates')
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => loadCloudData())
-  .on('postgres_changes', { event: '*', schema: 'public', table: 'user_profile' }, () => loadCloudData())
-  .subscribe();
+function loadLocalFallback() {
+  const local = JSON.parse(localStorage.getItem("homework_backup")) || null;
+  if (local) {
+    data = local;
+  }
+  render();
+}
+
+function saveLocalBackup() {
+  localStorage.setItem("homework_backup", JSON.stringify(data));
+}
+
+// 실시간 동기화 채널
+if (supabase) {
+  try {
+    supabase.channel('cloud-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => loadCloudData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_profile' }, () => loadCloudData())
+      .subscribe();
+  } catch(e) {
+    console.error("실시간 구독 실패:", e);
+  }
+}
 
 async function addTask() {
   const title = taskInput.value.trim();
@@ -293,13 +374,19 @@ async function addTask() {
     created_at: todayString()
   };
 
-  const { error } = await supabase.from('tasks').insert([newTask]);
-  if (error) {
-    showToast("⚠️ 등록 실패: 데이터베이스 연결 확인 필요");
+  if (supabase) {
+    const { error } = await supabase.from('tasks').insert([newTask]);
+    if (error) {
+      showToast("⚠️ 등록 실패: 인터넷을 확인하세요.");
+      return;
+    }
   } else {
-    taskInput.value = "";
-    showToast("🎯 새로운 퀘스트가 전송되었습니다!");
+    data.tasks.push(newTask);
+    saveLocalBackup();
+    render();
   }
+  taskInput.value = "";
+  showToast("🎯 새로운 퀘스트가 등록되었습니다!");
 }
 
 async function toggleTask(id) {
@@ -325,12 +412,20 @@ async function toggleTask(id) {
     showToast("↩️ 퀘스트를 다시 진행 중으로 변경했습니다.");
   }
 
-  await supabase.from('tasks').update({ completed: task.completed }).eq('id', id);
-  await supabase.from('user_profile').update({
-    xp: newXP,
-    total_completed: newCompleted,
-    completed_dates: dates
-  }).eq('id', 1);
+  if (supabase) {
+    await supabase.from('tasks').update({ completed: task.completed }).eq('id', id);
+    await supabase.from('user_profile').update({
+      xp: newXP,
+      total_completed: newCompleted,
+      completed_dates: dates
+    }).eq('id', 1);
+  } else {
+    data.xp = newXP;
+    data.totalCompleted = newCompleted;
+    data.completedDates = dates;
+    saveLocalBackup();
+    render();
+  }
 
   const newLevel = getLevel(newXP);
   if (newLevel > oldLevel) showLevelUp(newLevel);
@@ -344,18 +439,29 @@ async function deleteTask(id) {
   if (task.completed) {
     const newXP = Math.max(0, data.xp - task.xp);
     const newCompleted = Math.max(0, data.totalCompleted - 1);
-    await supabase.from('user_profile').update({
-      xp: newXP,
-      total_completed: newCompleted
-    }).eq('id', 1);
+    if (supabase) {
+      await supabase.from('user_profile').update({
+        xp: newXP,
+        total_completed: newCompleted
+      }).eq('id', 1);
+    } else {
+      data.xp = newXP;
+      data.totalCompleted = newCompleted;
+    }
   }
 
-  await supabase.from('tasks').delete().eq('id', id);
+  if (supabase) {
+    await supabase.from('tasks').delete().eq('id', id);
+  } else {
+    data.tasks = data.tasks.filter(t => t.id !== id);
+    saveLocalBackup();
+    render();
+  }
   showToast("🗑️ 퀘스트를 삭제했습니다.");
 }
 
 /* ========================================================
-   3. 화면 렌더링
+   4. UI 렌더링
 ======================================================== */
 function render() {
   renderTasks();
@@ -366,7 +472,7 @@ function render() {
 }
 
 function renderTasks() {
-  if (data.tasks.length === 0) {
+  if (!data.tasks || data.tasks.length === 0) {
     taskList.innerHTML = `
       <div class="empty">
         <div class="empty-icon">🗺️</div>
@@ -467,57 +573,13 @@ function renderTheme() {
   themeBtn.textContent = data.darkMode ? "☀️" : "🌙";
 }
 
-themeBtn.addEventListener("click", () => {
-  data.darkMode = !data.darkMode;
-  renderTheme();
-  showToast(data.darkMode ? "🌙 다크모드로 변경했습니다." : "☀️ 밝은 모드로 변경했습니다.");
-});
-
-// 관리자 모드 제어
-adminBtn.addEventListener("click", () => {
-  if (isAdmin) {
-    isAdmin = false;
-    document.body.classList.remove("admin-mode");
-    adminBtn.textContent = "🔒";
-    showToast("사용자 모드로 전환되었습니다.");
-  } else {
-    const enteredPin = prompt("관리자 PIN 번호를 입력하세요 (기본: 1234):");
-    if (enteredPin === ADMIN_PIN) {
-      isAdmin = true;
-      document.body.classList.add("admin-mode");
-      adminBtn.textContent = "🔓";
-      showToast("관리자 모드가 활성화되었습니다.");
-    } else if (enteredPin !== null) {
-      alert("PIN 번호가 올바르지 않습니다.");
-    }
-  }
-});
-
-character.addEventListener("click", () => {
-  const messages = [
-    "🔥 할 수 있어요!", "💪 조금만 더 힘내요!", "⭐ 최고의 모험가!",
-    "🚀 숙제를 정복하러 가볼까요?", "🍀 오늘도 좋은 하루!", "⚔️ 퀘스트를 완료해봅시다!"
-  ];
-  showToast(messages[Math.floor(Math.random() * messages.length)]);
-  character.style.transform = "scale(1.25) rotate(8deg)";
-  setTimeout(() => { character.style.transform = ""; }, 250);
-});
-
 function showLevelUp(level) {
   levelUpText.textContent = `축하합니다! Lv. ${level} ${getLevelName(level)}이 되었습니다!`;
   levelUp.classList.add("show");
 }
 
-closeLevelUp.addEventListener("click", () => {
-  levelUp.classList.remove("show");
-});
-
-addBtn.addEventListener("click", addTask);
-taskInput.addEventListener("keypress", (e) => {
-  if (e.key === "Enter") addTask();
-});
-
-// 시작 시 데이터베이스 불러오기
+/* 최초 실행 */
+render();
 loadCloudData();
 </script>
 </body>
